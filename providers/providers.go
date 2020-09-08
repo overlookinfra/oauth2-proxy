@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 
+	"golang.org/x/oauth2"
+
 	"github.com/coreos/go-oidc"
 	"github.com/oauth2-proxy/oauth2-proxy/pkg/apis/sessions"
 )
@@ -17,8 +19,10 @@ type Provider interface {
 	ValidateGroup(string) bool
 	ValidateSessionState(ctx context.Context, s *sessions.SessionState) bool
 	GetLoginURL(redirectURI, finalRedirect string) string
+	GetOfflineToken(username string, password string) (string, int)
 	RefreshSessionIfNeeded(ctx context.Context, s *sessions.SessionState) (bool, error)
 	CreateSessionStateFromBearerToken(ctx context.Context, rawIDToken string, idToken *oidc.IDToken) (*sessions.SessionState, error)
+	GetAccessTokenFromRefreshToken(ctx context.Context, refreshToken string) (*oauth2.Token, error)
 }
 
 // New provides a new Provider based on the configured provider string

@@ -69,6 +69,7 @@ type OAuthProxy struct {
 	OAuthCallbackPath string
 	AuthOnlyPath      string
 	UserInfoPath      string
+	OfflineTokenPath  string
 
 	redirectURL             *url.URL // the url to receive requests at
 	whitelistDomains        []string
@@ -184,6 +185,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 		OAuthCallbackPath: fmt.Sprintf("%s/callback", opts.ProxyPrefix),
 		AuthOnlyPath:      fmt.Sprintf("%s/auth", opts.ProxyPrefix),
 		UserInfoPath:      fmt.Sprintf("%s/userinfo", opts.ProxyPrefix),
+		OfflineTokenPath:  fmt.Sprintf("%s/offlinetoken", opts.ProxyPrefix),
 
 		ProxyPrefix:             opts.ProxyPrefix,
 		provider:                opts.GetProvider(),
@@ -224,6 +226,10 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 
 func buildSessionChain(opts *options.Options, sessionStore sessionsapi.SessionStore, validator basic.Validator) alice.Chain {
 	chain := alice.New(middleware.NewScope())
+
+	if opts.UseRefreshToken {
+		chain = chain.Append(middleware.NewAccessTokenFromRefreshToken(opts.GetProvider()))
+	}
 
 	if opts.SkipJwtBearerTokens {
 		sessionLoaders := []middlewareapi.TokenToSessionLoader{}
@@ -658,6 +664,8 @@ func (p *OAuthProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		p.AuthenticateOnly(rw, req)
 	case path == p.UserInfoPath:
 		p.UserInfo(rw, req)
+	case path == p.OfflineTokenPath:
+		p.OfflineToken(rw, req)
 	default:
 		p.Proxy(rw, req)
 	}
@@ -693,7 +701,6 @@ func (p *OAuthProxy) SignIn(rw http.ResponseWriter, req *http.Request) {
 
 //UserInfo endpoint outputs session email and preferred username in JSON format
 func (p *OAuthProxy) UserInfo(rw http.ResponseWriter, req *http.Request) {
-
 	session, err := p.getAuthenticatedSession(rw, req)
 	if err != nil {
 		http.Error(rw, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
@@ -709,6 +716,55 @@ func (p *OAuthProxy) UserInfo(rw http.ResponseWriter, req *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(rw).Encode(userInfo)
+	if err != nil {
+		logger.Printf("Error encoding user info: %v", err)
+		p.ErrorPage(rw, http.StatusInternalServerError, "Internal Server Error", err.Error())
+	}
+}
+
+func getQueryParam(req *http.Request, param string) string {
+	keys, ok := req.URL.Query()[param]
+
+	if !ok || len(keys[0]) < 1 {
+		return ""
+	}
+
+	return keys[0]
+}
+
+func getBasicAuthDetail(req *http.Request) (string, string) {
+	auth := strings.SplitN(req.Header.Get("Authorization"), " ", 2)
+
+	if len(auth) != 2 || auth[0] != "Basic" {
+		return "", ""
+	}
+
+	payload, _ := b64.StdEncoding.DecodeString(auth[1])
+	pair := strings.SplitN(string(payload), ":", 2)
+
+	if len(pair) != 2 {
+		return "", ""
+	}
+
+	return pair[0], pair[1]
+}
+
+//OfflineToken endpoint outputs session email and preferred username in JSON format
+func (p *OAuthProxy) OfflineToken(rw http.ResponseWriter, req *http.Request) {
+	username, password := getBasicAuthDetail(req)
+	if username == "" || password == "" {
+		username = getQueryParam(req, "username")
+		password = getQueryParam(req, "password")
+	}
+	offlineToken, respCode := p.provider.GetOfflineToken(username, password)
+	if respCode != http.StatusOK {
+		rw.Header().Set("Content-Type", "text/plain")
+		rw.WriteHeader(respCode)
+	}
+
+	rw.Header().Set("Content-Type", "text/plain")
+	rw.WriteHeader(http.StatusOK)
+	_, err := rw.Write([]byte(offlineToken))
 	if err != nil {
 		logger.Printf("Error encoding user info: %v", err)
 		p.ErrorPage(rw, http.StatusInternalServerError, "Internal Server Error", err.Error())

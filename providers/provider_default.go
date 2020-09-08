@@ -5,8 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/oauth2-proxy/oauth2-proxy/pkg/logger"
+
+	"golang.org/x/oauth2"
 
 	"github.com/coreos/go-oidc"
 
@@ -94,6 +99,35 @@ func (p *ProviderData) GetLoginURL(redirectURI, state string) string {
 	return a.String()
 }
 
+// GetOfflineToken with typical oauth parameters
+func (p *ProviderData) GetOfflineToken(username string, password string) (string, int) {
+	params := url.Values{}
+	params.Add("scope", "offline_access")
+	params.Add("client_id", p.ClientID)
+	params.Add("username", username)
+	params.Add("password", password)
+	params.Add("grant_type", "password")
+	params.Add("client_secret", p.ClientSecret)
+
+	var token oauth2.Token
+	result := requests.New(p.RedeemURL.String()).
+		WithMethod("POST").
+		WithBody(bytes.NewBufferString(params.Encode())).
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").Do()
+
+	if result.Error() != nil || result.StatusCode() != http.StatusOK {
+		logger.Errorf("Error retrieving offline token %s. Status code %d", result.Error(), result.StatusCode())
+		responseCode := http.StatusInternalServerError
+		if result.StatusCode() != http.StatusOK {
+			responseCode = result.StatusCode()
+		}
+		return "", responseCode
+	}
+
+	result.UnmarshalInto(&token)
+	return token.RefreshToken, http.StatusOK
+}
+
 // GetEmailAddress returns the Account email address
 func (p *ProviderData) GetEmailAddress(ctx context.Context, s *sessions.SessionState) (string, error) {
 	return "", errors.New("not implemented")
@@ -130,4 +164,30 @@ func (p *ProviderData) RefreshSessionIfNeeded(ctx context.Context, s *sessions.S
 // to convert ID tokens into sessions
 func (p *ProviderData) CreateSessionStateFromBearerToken(ctx context.Context, rawIDToken string, idToken *oidc.IDToken) (*sessions.SessionState, error) {
 	return nil, errors.New("not implemented")
+}
+
+// GetAccessTokenFromRefreshToken with a context and refresh token
+func (p *ProviderData) GetAccessTokenFromRefreshToken(ctx context.Context, refreshToken string) (*oauth2.Token, error) {
+	clientSecret, err := p.GetClientSecret()
+	if err != nil {
+		return nil, err
+	}
+
+	c := oauth2.Config{
+		ClientID:     p.ClientID,
+		ClientSecret: clientSecret,
+		Endpoint: oauth2.Endpoint{
+			TokenURL: p.RedeemURL.String(),
+		},
+	}
+	t := &oauth2.Token{
+		RefreshToken: refreshToken,
+		Expiry:       time.Now().Add(-time.Hour),
+	}
+	token, err := c.TokenSource(ctx, t).Token()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %v", err)
+	}
+
+	return token, nil
 }

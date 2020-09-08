@@ -72,6 +72,7 @@ type Options struct {
 	ExtraJwtIssuers       []string `flag:"extra-jwt-issuers" cfg:"extra_jwt_issuers"`
 	PassBasicAuth         bool     `flag:"pass-basic-auth" cfg:"pass_basic_auth"`
 	SetBasicAuth          bool     `flag:"set-basic-auth" cfg:"set_basic_auth"`
+	UseRefreshToken       bool     `flag:"use-refresh-token" cfg:"use_refresh_token"`
 	PreferEmailToUser     bool     `flag:"prefer-email-to-user" cfg:"prefer_email_to_user"`
 	BasicAuthPassword     string   `flag:"basic-auth-password" cfg:"basic_auth_password"`
 	PassAccessToken       bool     `flag:"pass-access-token" cfg:"pass_access_token"`
@@ -186,6 +187,7 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.Bool("set-xauthrequest", false, "set X-Auth-Request-User and X-Auth-Request-Email response headers (useful in Nginx auth_request mode)")
 	flagSet.Bool("pass-basic-auth", true, "pass HTTP Basic Auth, X-Forwarded-User and X-Forwarded-Email information to upstream")
 	flagSet.Bool("set-basic-auth", false, "set HTTP Basic Auth information in response (useful in Nginx auth_request mode)")
+	flagSet.Bool("use-refresh-token", false, "Use the refresh token from the X-Auth-Refresh-Token header to get an access token.")
 	flagSet.Bool("prefer-email-to-user", false, "Prefer to use the Email address as the Username when passing information to upstream. Will only use Username if Email is unavailable, eg. htaccess authentication. Used in conjunction with -pass-basic-auth and -pass-user-headers")
 	flagSet.Bool("pass-user-headers", true, "pass X-Forwarded-User and X-Forwarded-Email information to upstream")
 	flagSet.String("basic-auth-password", "", "the password to set when passing the HTTP Basic Auth header")
